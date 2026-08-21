@@ -17,15 +17,30 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Install Chrome Remote Desktop via Chocolatey
+      - name: Download and Force Deploy Chrome Remote Desktop
         shell: powershell
         run: |
-          Write-Host "Deploying Chrome Remote Desktop Host using Chocolatey..."
-          # choco handles headless automation, privilege allocation, and dependencies cleanly
-          choco install chrome-remote-desktop -y --no-progress
+          $ProgressPreference = 'SilentlyContinue'
           
-          Write-Host "Deployment completed. Pausing 15 seconds to ensure host services stabilize..."
-          Start-Sleep -Seconds 15
+          Write-Host "Downloading Google's secure installation package..."
+          $msiUrl = "https://google.com"
+          $installerPath = "$env:TEMP\crd.msi"
+          Invoke-WebRequest -Uri $msiUrl -OutFile $installerPath
+          
+          Write-Host "Deploying installer inside an isolated system task session..."
+          # Running the MSI using a dedicated background argument script isolates the install thread
+          # This breaks any modal windows or update prompts that freeze headless machines
+          $scriptBlock = {
+              param($path)
+              Start-Process msiexec.exe -ArgumentList "/i", "`"$path`"", "/qn", "/norestart", "ALLUSERS=1" -Wait
+          }
+          
+          $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $installerPath
+          Write-Host "Waiting 30 seconds for background execution to commit changes..."
+          $job | Wait-Job -Timeout 30 | Receive-Job
+          
+          # Clean up download residue
+          if (Test-Path $installerPath) { Remove-Item $installerPath -Force }
 
       - name: Configure and Start CRD Session
         shell: powershell
@@ -36,39 +51,36 @@ jobs:
           
           $pin = "${{ github.event.inputs.pin_code }}"
           
-          # Dynamically trace the location of the installed executable target
+          # Scan common installation folder configurations dynamically
           $searchPaths = @(
               "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe",
               "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe",
-              "C:\Program Files\Google\Chrome Remote Desktop\*\remoting_start_host.exe",
-              "C:\Program Files (x86)\Google\Chrome Remote Desktop\*\remoting_start_host.exe"
+              "C:\Program Files\Google\Chrome Remote Desktop\*\remoting_start_host.exe"
           )
           
           $exePath = $null
           foreach ($path in $searchPaths) {
               $resolved = Resolve-Path $path -ErrorAction SilentlyContinue
-              if ($resolved) {
-                  $exePath = $resolved.Path
-                  break
-              }
+              if ($resolved) { $exePath = $resolved.Path; break }
           }
           
           if (-not $exePath) {
-              Write-Error "CRD executable could not be located in standard file system paths!"
+              Write-Error "CRD executable could not be mapped. Let's force an directory scan to triage..."
+              Get-ChildItem -Path "C:\Program Files" -Recurse -Filter "*remoting*" -ErrorAction SilentlyContinue | Select-Object FullName
               exit 1
           }
           
-          Write-Host "Target located at: $exePath"
+          Write-Host "Target engine isolated at: $exePath"
           
-          # Isolate parameters cleanly from your command input line string
+          # Parse parameter arrays safely from your string input parameters
           $codeParam = ""
-          $redirectParam = "https://google.com"
+          $redirectParam = "https://remotedesktop.google.com/_/oauthredirect"
           
           if ($rawInput -match '--code="([^"]+)"') { $codeParam = $Matches[1] }
           elseif ($rawInput -match '--code=([^ ]+)') { $codeParam = $Matches[1].Trim('"') }
           
           if (-not $codeParam) {
-              Write-Error "Failed to isolate valid authorization token values from your input text block."
+              Write-Error "Failed to isolate valid token values from input. Please check configuration command layout."
               exit 1
           }
           
@@ -79,11 +91,11 @@ jobs:
               "--pin=`"$pin`""
           )
           
-          Write-Host "Registering machine profile with Google services..."
+          Write-Host "Registering machine instance with Google..."
           $process = Start-Process -FilePath $exePath -ArgumentList $arguments -NoNewWindow -PassThru -Wait
           
           if ($process.ExitCode -ne 0) {
-              Write-Error "Google service host registration dropped out with error code: $($process.ExitCode)"
+              Write-Error "Google infrastructure authorization dropped out with error code: $($process.ExitCode)"
               exit 1
           }
 
@@ -93,11 +105,11 @@ jobs:
           Write-Host "`n=================================================="
           Write-Host "     CHROME REMOTE DESKTOP SYSTEM ONLINE          "
           Write-Host "=================================================="
-          Write-Host "Go to: https://remotedesktop.google.com/access"
+          Write-Host "Go to: https://google.com"
           Write-Host "Your Device Access PIN is: ${{ github.event.inputs.pin_code }}"
           Write-Host "==================================================`n"
           
           while ($true) {
-              Write-Host "[$(Get-Date)] Session Alive - Ready for connections via Google Web Dashboard"
+              Write-Host "[$(Get-Date)] Session Active - Ready for connections via Google Web Dashboard"
               Start-Sleep -Seconds 300
           }
