@@ -1,0 +1,67 @@
+name: Chrome Remote Desktop RDP
+
+on:
+  workflow_dispatch:
+    inputs:
+      auth_code:
+        description: 'Paste your entire Chrome Remote Desktop Windows (cmd.exe) string here'
+        required: true
+      pin_code:
+        description: 'Set a temporary 6-digit access PIN'
+        required: true
+        default: '123456'
+
+jobs:
+  crd-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Download and Install Chrome Remote Desktop
+        shell: powershell
+        run: |
+          Write-Host "Downloading Google Remote Desktop installer..."
+          $msiUrl = "https://google.com"
+          $installerPath = "$env:TEMP\crd.msi"
+          
+          Invoke-WebRequest -Uri $msiUrl -OutFile $installerPath
+          
+          Write-Host "Installing MSI silently..."
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          
+          Remove-Item $installerPath -Force
+          Write-Host "Installation finalized."
+
+      - name: Configure and Start CRD Session
+        shell: powershell
+        run: |
+          # Fetch the raw inputs
+          $authCmd = "${{ github.event.inputs.auth_code }}"
+          $pin = "${{ github.event.inputs.pin_code }}"
+          
+          # Clean up any accidental outer single or double quotes the user might have included
+          $authCmd = $authCmd.Trim("'").Trim('"')
+          
+          # Append the critical host PIN parameter directly to the instruction string
+          $finalCmd = $authCmd + " --pin=" + $pin
+          
+          Write-Host "Registering runner machine with Google's headless service..."
+          
+          # Force execution through traditional CMD context to prevent PowerShell variable translation errors
+          cmd.exe /c $finalCmd
+
+      - name: Maintain Connection Loop
+        shell: powershell
+        run: |
+          Write-Host "`n=================================================="
+          Write-Host "     CHROME REMOTE DESKTOP SYSTEM ONLINE          "
+          Write-Host "=================================================="
+          Write-Host "Go to: https://google.com"
+          Write-Host "Your Device Access PIN is: ${{ github.event.inputs.pin_code }}"
+          Write-Host "==================================================`n"
+          
+          # Keep runner alive securely
+          while ($true) {
+              Write-Host "[$(Get-Date)] Session Alive - Ready for connections via Google Web Dashboard"
+              Start-Sleep -Seconds 300
+          }
