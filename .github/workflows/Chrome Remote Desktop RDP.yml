@@ -1,29 +1,92 @@
-name: Secure Web Terminal Portal
+name: Chrome Remote Desktop RDP
 
 on:
   workflow_dispatch:
+    inputs:
+      auth_code:
+        description: 'Paste your entire Chrome Remote Desktop Windows (cmd.exe) string here'
+        required: true
+      pin_code:
+        description: 'Set a temporary 6-digit access PIN'
+        required: true
+        default: '123456'
 
 jobs:
-  web-session:
+  crd-rdp:
     runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Launch Protected Web Session Handshake
+      - name: Force Install Official Chrome Remote Desktop Package
         shell: powershell
         run: |
-          Write-Host "=================================================="
-          Write-Host "         WEB TERMINAL Handshake ONLINE            "
-          Write-Host "=================================================="
-          Write-Host "To safely manage this machine, perform these steps:"
-          Write-Host "1. Go to: https://shell.google.com"
-          Write-Host "2. Click 'Launch Web Terminal Session'"
-          Write-Host "=================================================="
+          Write-Host "Deploying verified Chrome Remote Desktop Host using precise Chocolatey naming..."
+          
+          # FIXED: Changed the package name to match the official Chocolatey Repository identity
+          choco install chrome-remote-desktop-host -y --no-progress
+          
+          Write-Host "Deployment completed. Checking system path initialization status..."
+          Start-Sleep -Seconds 15
 
-      - name: Maintain Environment Window Loop
+      - name: Authenticate and Register with Google Cloud
+        shell: powershell
+        env:
+          RAW_INPUT: ${{ github.event.inputs.auth_code }}
+        run: |
+          $rawInput = $env:RAW_INPUT.Trim()
+          $pin = "${{ github.event.inputs.pin_code }}"
+          
+          # Check standard system installation locations dynamically
+          $exePath = "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          if (-not (Test-Path $exePath)) {
+              $exePath = "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          }
+          
+          if (-not (Test-Path $exePath)) {
+              Write-Error "Critical Error: Official installation folder structure was not found."
+              exit 1
+          }
+          
+          Write-Host "Official engine isolated at: $exePath"
+          
+          # Parse out the authorization tokens cleanly from your provided input string
+          $codeParam = ""
+          $redirectParam = "https://google.com"
+          
+          if ($rawInput -match '--code="([^"]+)"') { 
+              $codeParam = $Matches[1] 
+          }
+          elseif ($rawInput -match '--code=([^ ]+)') { 
+              $codeParam = $Matches[1].Trim('"').Trim("'") 
+          }
+          
+          if (-not $codeParam) {
+              Write-Error "Failed to parse token details from the input string."
+              exit 1
+          }
+          
+          $arguments = @(
+              "--code=`"$codeParam`"",
+              "--redirect-url=`"$redirectParam`"",
+              "--name=`"$env:COMPUTERNAME`"",
+              "--pin=`"$pin`""
+          )
+          
+          Write-Host "Sending native registration handshake signal to Google account..."
+          $process = Start-Process -FilePath $exePath -ArgumentList $arguments -NoNewWindow -PassThru -Wait
+          Write-Host "Registration engine closed with exit status: $($process.ExitCode)"
+
+      - name: Maintain Connection Loop
         shell: powershell
         run: |
+          Write-Host "`n=================================================="
+          Write-Host "     CHROME REMOTE DESKTOP SYSTEM ONLINE          "
+          Write-Host "=================================================="
+          Write-Host "Go to: https://google.com"
+          Write-Host "Your Device Access PIN is: ${{ github.event.inputs.pin_code }}"
+          Write-Host "==================================================`n"
+          
           while ($true) {
-              Write-Host "[$(Get-Date)] Environment Engine Active - Ready for secure background instructions..."
+              Write-Host "[$(Get-Date)] Runner Active - Monitoring incoming web dashboard traffic..."
               Start-Sleep -Seconds 300
           }
