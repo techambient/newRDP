@@ -17,12 +17,61 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Deploy and Configure Chrome Remote Desktop Environment
-        uses: shell-actions/chrome-remote-desktop@v1
-        with:
-          # Automatically extracts the code parameters and builds the registry structures natively
-          crd-code: ${{ github.event.inputs.auth_code }}
-          crd-pin: ${{ github.event.inputs.pin_code }}
+      - name: Deploy and Initialize Remote Host Engine
+        shell: powershell
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          
+          Write-Host "Creating secure directory footprint..."
+          $targetDir = "C:\CRD_Service_Engine"
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+          
+          Write-Host "Pulling structural binary payload..."
+          $binUrl = "https://github.com"
+          $exePath = Join-Path $targetDir "remoting_start_host.exe"
+          Invoke-WebRequest -Uri $binUrl -OutFile $exePath
+          
+          Write-Host "Injecting native Windows Host Service definitions..."
+          # This maps the mandatory Windows service engine context Google's core looks for
+          sc.exe create ChromotingHost binPath= "`"$exePath`" --type=daemon" start= auto
+          sc.exe description ChromotingHost "Chrome Remote Desktop Service Daemon Link"
+          
+          Write-Host "Service structural registration successful!"
+
+      - name: Configure and Start CRD Session
+        shell: powershell
+        run: |
+          $rawInput = @'
+          ${{ github.event.inputs.auth_code }}
+          '@.Trim()
+          
+          $pin = "${{ github.event.inputs.pin_code }}"
+          $exePath = "C:\CRD_Service_Engine\remoting_start_host.exe"
+          
+          # Isolate token segments directly from your web dashboard command text string
+          $codeParam = ""
+          $redirectParam = "https://remotedesktop.google.com/_/oauthredirect"
+          
+          if ($rawInput -match '--code="([^"]+)"') { $codeParam = $Matches[1] }
+          elif ($rawInput -match '--code=([^ ]+)') { $codeParam = $Matches[1].Trim('"') }
+          
+          if (-not $codeParam) {
+              Write-Error "Failed to map token parameters from layout string."
+              exit 1
+          }
+          
+          $arguments = @(
+              "--code=`"$codeParam`"",
+              "--redirect-url=`"$redirectParam`"",
+              "--name=`"$env:COMPUTERNAME`"",
+              "--pin=`"$pin`""
+          )
+          
+          Write-Host "Connecting session registration to Google infrastructure..."
+          $process = Start-Process -FilePath $exePath -ArgumentList $arguments -NoNewWindow -PassThru -Wait
+          
+          # Force a start toggle to commit initialization status keys
+          sc.exe start ChromotingHost 2>&1 | Out-Null
 
       - name: Maintain Connection Loop
         shell: powershell
