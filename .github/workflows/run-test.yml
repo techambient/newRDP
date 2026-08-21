@@ -1,0 +1,31 @@
+name: Windows Test Runner with Installed Apps
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [run-windows-test]
+
+jobs:
+  run-tests:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Microsoft Office & Apps
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy Unrestricted -Scope Process -Force
+          .\.github\scripts\install-apps.ps1
+
+      - name: Verify Office Installation
+        shell: powershell
+        run: |
+          # Check if Word/Excel binaries exist
+          Get-ChildItem "C:\Program Files\Microsoft Office\root\Office*" -ErrorAction SilentlyContinue
+
+      - name: Run Your Main Automation / Tests
+        shell: powershell
+        run: |
+          Write-Host "Executing main test suite with installed software..."
