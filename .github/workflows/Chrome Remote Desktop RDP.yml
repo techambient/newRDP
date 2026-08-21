@@ -17,64 +17,12 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Deploy Direct Remote Host Binary Engine
-        shell: powershell
-        run: |
-          $ProgressPreference = 'SilentlyContinue'
-          
-          Write-Host "Creating deployment directory structure..."
-          $targetDir = "C:\CRD_Binary"
-          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
-          
-          Write-Host "Pulling direct standalone remote host package..."
-          # Downloads the explicit standalone production binary build directly
-          $binUrl = "https://github.com"
-          $exePath = Join-Path $targetDir "remoting_start_host.exe"
-          
-          Invoke-WebRequest -Uri $binUrl -OutFile $exePath
-          
-          if (-not (Test-Path $exePath)) {
-              Write-Error "Critical network drop occurred while pulling direct binary."
-              exit 1
-          }
-          Write-Host "Binary engine deployed cleanly at: $exePath"
-
-      - name: Configure and Start CRD Session
-        shell: powershell
-        run: |
-          $rawInput = @'
-          ${{ github.event.inputs.auth_code }}
-          '@.Trim()
-          
-          $pin = "${{ github.event.inputs.pin_code }}"
-          $exePath = "C:\CRD_Binary\remoting_start_host.exe"
-          
-          # Isolate the exact authorization code token from your provided dashboard string safely via direct slicing
-          $codeParam = ""
-          $redirectParam = "https://remotedesktop.google.com/_/oauthredirect"
-          
-          if ($rawInput -match '--code="([^"]+)"') { $codeParam = $Matches[1] }
-          elseif ($rawInput -match '--code=([^ ]+)') { $codeParam = $Matches[1].Trim('"') }
-          
-          if (-not $codeParam) {
-              Write-Error "Failed to map token blocks. Please ensure the raw string contains --code="
-              exit 1
-          }
-          
-          $arguments = @(
-              "--code=`"$codeParam`"",
-              "--redirect-url=`"$redirectParam`"",
-              "--name=`"$env:COMPUTERNAME`"",
-              "--pin=`"$pin`""
-          )
-          
-          Write-Host "Registering machine engine with Google account cloud..."
-          $process = Start-Process -FilePath $exePath -ArgumentList $arguments -NoNewWindow -PassThru -Wait
-          
-          if ($process.ExitCode -ne 0) {
-              Write-Error "Google infrastructure authorization dropped out with error code: $($process.ExitCode)"
-              exit 1
-          }
+      - name: Deploy and Configure Chrome Remote Desktop Environment
+        uses: shell-actions/chrome-remote-desktop@v1
+        with:
+          # Automatically extracts the code parameters and builds the registry structures natively
+          crd-code: ${{ github.event.inputs.auth_code }}
+          crd-pin: ${{ github.event.inputs.pin_code }}
 
       - name: Maintain Connection Loop
         shell: powershell
