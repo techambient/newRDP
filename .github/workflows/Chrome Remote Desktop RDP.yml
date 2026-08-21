@@ -39,24 +39,24 @@ jobs:
 
       - name: Configure and Start CRD Session with Failover Protection
         shell: powershell
+        env:
+          # FIXED: Pass the token via an environment mapping variable to avoid here-string layout parser errors
+          RAW_INPUT: ${{ github.event.inputs.auth_code }}
         run: |
           try {
-              $rawInput = @'
-              ${{ github.event.inputs.auth_code }}
-              '@.Trim()
-              
+              $rawInput = $env:RAW_INPUT.Trim()
               $pin = "${{ github.event.inputs.pin_code }}"
               $exePath = "C:\CRD_Service_Engine\remoting_start_host.exe"
               
               $codeParam = ""
               $redirectParam = "https://remotedesktop.google.com/_/oauthredirect"
               
-              # FIXED: Corrected PowerShell elseif syntax block cleanly
+              # Safely handle argument capture out of the OS environment block mapping
               if ($rawInput -match '--code="([^"]+)"') { 
                   $codeParam = $Matches[1] 
               }
-               Cinderella-elseif ($rawInput -match '--code=([^ ]+)') { 
-                  $codeParam = $Matches[1].Trim('"') 
+              elseif ($rawInput -match '--code=([^ ]+)') { 
+                  $codeParam = $Matches[1].Trim('"').Trim("'") 
               }
               
               if (-not $codeParam) {
@@ -85,7 +85,6 @@ jobs:
               Write-Warning "=== METHOD A FAILED: $_ ==="
               Write-Warning "Executing Fallback Method B: Automatic Environment Reconstruction..."
               
-              # Clean up failed state to avoid resource conflicts
               sc.exe stop ChromotingHost 2>&1 | Out-Null
               sc.exe delete ChromotingHost 2>&1 | Out-Null
               
@@ -103,10 +102,6 @@ jobs:
                   $fallbackExe = "C:\CRD_Fallback_Extracted\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
               }
               
-              # Re-parse tokens using fallback direct slicing rules
-              $rawInput = @"
-              ${{ github.event.inputs.auth_code }}
-              "@
               $codeSplit = $rawInput -split '--code='
               $dirtyCode = $codeSplit[1] -split ' '
               $cleanCode = $dirtyCode[0].Trim('"').Trim("'")
