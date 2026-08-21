@@ -21,50 +21,53 @@ jobs:
         shell: powershell
         run: |
           Write-Host "Downloading Google Remote Desktop installer..."
-          $msiUrl = "https://google.com"
+          # FIX: Restored the true, direct binary download URL
+          $msiUrl = "https://dl.google.com/dl/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi"
           $installerPath = "$env:TEMP\crd.msi"
           
           Invoke-WebRequest -Uri $msiUrl -OutFile $installerPath
           
           Write-Host "Installing MSI silently..."
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          # /qn performs a completely hidden, silent deployment
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/qn", "/norestart" -Wait
           
           Remove-Item $installerPath -Force
-          Write-Host "Installation completed. Waiting 10 seconds for service paths to initialize..."
-          Start-Sleep -Seconds 10
+          Write-Host "Installation execution completed. Waiting 15 seconds for file registration..."
+          Start-Sleep -Seconds 15
 
       - name: Configure and Start CRD Session
         shell: powershell
         run: |
-          # Safely swallow raw input string
+          # Safely ingest the raw web authorization command string
           $rawInput = @'
           ${{ github.event.inputs.auth_code }}
           '@.Trim()
           
           $pin = "${{ github.event.inputs.pin_code }}"
           
-          # Use the absolute environment path target to find the executable reliably
+          # Target the binary file directly via environment folder shortcuts
           $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
           $exePath = Join-Path $programFilesX86 "Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
           
+          # Verification safeguard to check installation health before moving forward
           if (-not (Test-Path $exePath)) {
-              Write-Error "CRD executable could not be found at: $exePath"
+              Write-Error "CRD executable could not be found at: $exePath. The background MSI installer may have failed."
               exit 1
           }
           
-          # Extract out Google's token arguments from your input command safely
+          # Use Regex tracking to break out token components safely from the raw input
           $codeParam = ""
           $redirectParam = ""
           
-          if ($rawInput -match '--code="([^"]+)"') { $codeParam = $matches[1] }
-          if ($rawInput -match '--redirect-url="([^"]+)"') { $redirectParam = $matches[1] }
+          if ($rawInput -match '--code="([^"]+)"') { $codeParam = $Matches[1] }
+          if ($rawInput -match '--redirect-url="([^"]+)"') { $redirectParam = $Matches[1] }
           
           if (-not $codeParam) {
-              Write-Error "Failed to parse authorization code token from your input text!"
+              Write-Error "Failed to parse authorization code token from your input text! Ensure it contains --code='...'"
               exit 1
           }
           
-          # Build a perfectly formatted native execution command string
+          # Rebuild clean parameter arrays to launch the executable
           $arguments = @(
               "--code=`"$codeParam`"",
               "--redirect-url=`"$redirectParam`"",
@@ -86,7 +89,7 @@ jobs:
           Write-Host "`n=================================================="
           Write-Host "     CHROME REMOTE DESKTOP SYSTEM ONLINE          "
           Write-Host "=================================================="
-          Write-Host "Go to: https://google.com"
+          Write-Host "Go to: https://remotedesktop.google.com/access"
           Write-Host "Your Device Access PIN is: ${{ github.event.inputs.pin_code }}"
           Write-Host "==================================================`n"
           
