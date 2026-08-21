@@ -17,71 +17,100 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Force Install Official Chrome Remote Desktop
+      - name: Deploy and Initialize Remote Host Engine
         shell: powershell
         run: |
           $ProgressPreference = 'SilentlyContinue'
           
-          Write-Host "Downloading official Google Remote Desktop MSI package..."
-          $msiUrl = "https://google.com"
-          $installerPath = "$env:TEMP\crd.msi"
-          Invoke-WebRequest -Uri $msiUrl -OutFile $installerPath
+          Write-Host "Creating secure directory footprint..."
+          $targetDir = "C:\CRD_Service_Engine"
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
           
-          Write-Host "Deploying official package natively with server bypass flags..."
-          # CHROME_REMOTING_ALLOW_RERUN=1 completely bypasses the service installation hang on Windows Server
-          $arguments = @("/i", "`"$installerPath`"", "/qn", "/norestart", "CHROME_REMOTING_ALLOW_RERUN=1", "ALLUSERS=1")
-          $process = Start-Process msiexec.exe -ArgumentList $arguments -Wait -PassThru
+          Write-Host "Pulling structural binary payload..."
+          $binUrl = "https://github.com"
+          $exePath = Join-Path $targetDir "remoting_start_host.exe"
+          Invoke-WebRequest -Uri $binUrl -OutFile $exePath
           
-          Write-Host "MSI Execution concluded with Exit Code: $($process.ExitCode)"
-          Remove-Item $installerPath -Force
+          Write-Host "Injecting native Windows Host Service definitions..."
+          sc.exe create ChromotingHost binPath= "`"$exePath`" --type=daemon" start= auto
+          sc.exe description ChromotingHost "Chrome Remote Desktop Service Daemon Link"
           
-          Write-Host "Waiting 10 seconds for system paths to index..."
-          Start-Sleep -Seconds 10
+          Write-Host "Service structural registration successful!"
 
-      - name: Authenticate and Register with Google Cloud
+      - name: Configure and Start CRD Session with Failover Protection
         shell: powershell
         env:
+          # FIXED: Pass the token via an environment mapping variable to avoid here-string layout parser errors
           RAW_INPUT: ${{ github.event.inputs.auth_code }}
         run: |
-          $rawInput = $env:RAW_INPUT.Trim()
-          $pin = "${{ github.event.inputs.pin_code }}"
-          
-          # Locate the true, officially installed Google executable path
-          $exePath = "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          if (-not (Test-Path $exePath)) {
-              $exePath = "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          try {
+              $rawInput = $env:RAW_INPUT.Trim()
+              $pin = "${{ github.event.inputs.pin_code }}"
+              $exePath = "C:\CRD_Service_Engine\remoting_start_host.exe"
+              
+              $codeParam = ""
+              $redirectParam = "https://remotedesktop.google.com/_/oauthredirect"
+              
+              # Safely handle argument capture out of the OS environment block mapping
+              if ($rawInput -match '--code="([^"]+)"') { 
+                  $codeParam = $Matches[1] 
+              }
+              elseif ($rawInput -match '--code=([^ ]+)') { 
+                  $codeParam = $Matches[1].Trim('"').Trim("'") 
+              }
+              
+              if (-not $codeParam) {
+                  throw "Could not parse code parameter from input layout string."
+              }
+              
+              $arguments = @(
+                  "--code=`"$codeParam`"",
+                  "--redirect-url=`"$redirectParam`"",
+                  "--name=`"$env:COMPUTERNAME`"",
+                  "--pin=`"$pin`""
+              )
+              
+              Write-Host "Executing Primary Method A: Direct Cloud Registration..."
+              $process = Start-Process -FilePath $exePath -ArgumentList $arguments -NoNewWindow -PassThru -Wait
+              
+              sc.exe start ChromotingHost 2>&1 | Out-Null
+              
+              if ($process.ExitCode -ne 0) {
+                  throw "Primary registration dropped with error code $($process.ExitCode)"
+              }
+              
+              Write-Host "Primary Method A connected successfully!"
           }
-          
-          if (-not (Test-Path $exePath)) {
-              Write-Error "Critical Error: Official installation folder structure was rejected by the OS."
-              exit 1
+          catch {
+              Write-Warning "=== METHOD A FAILED: $_ ==="
+              Write-Warning "Executing Fallback Method B: Automatic Environment Reconstruction..."
+              
+              sc.exe stop ChromotingHost 2>&1 | Out-Null
+              sc.exe delete ChromotingHost 2>&1 | Out-Null
+              
+              Write-Host "Downloading fallback clean platform installer..."
+              $fallbackUrl = "https://google.com"
+              $msiPath = "$env:TEMP\fallback_crd.msi"
+              Invoke-WebRequest -Uri $fallbackUrl -OutFile $msiPath
+              
+              Write-Host "Forcing localized raw administrative bypass file layout extraction..."
+              $bypassDir = "C:\CRD_Fallback_Extracted"
+              Start-Process msiexec.exe -ArgumentList "/a", "`"$msiPath`"", "/qn", "TARGETDIR=`"$bypassDir`"" -Wait
+              
+              $fallbackExe = "C:\CRD_Fallback_Extracted\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+              if (-not (Test-Path $fallbackExe)) {
+                  $fallbackExe = "C:\CRD_Fallback_Extracted\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+              }
+              
+              $codeSplit = $rawInput -split '--code='
+              $dirtyCode = $codeSplit[1] -split ' '
+              $cleanCode = $dirtyCode[0].Trim('"').Trim("'")
+              
+              $fallbackArgs = "/c `"$fallbackExe`" --code=`"$cleanCode`" --redirect-url=`"https://remotedesktop.google.com/_/oauthredirect`" --name=`"$env:COMPUTERNAME`" --pin=`"$pin`""
+              
+              Write-Host "Launching fallback service layer loop..."
+              Start-Process cmd.exe -ArgumentList $fallbackArgs -NoNewWindow
           }
-          
-          Write-Host "Official engine isolated at: $exePath"
-          
-          # Safely break out the exact command tokens using string parsing rules
-          $codeParam = ""
-          $redirectParam = "https://google.com"
-          
-          if ($rawInput -match '--code="([^"]+)"') { $codeParam = $Matches[1] }
-          elseif ($rawInput -match '--code=([^ ]+)') { $codeParam = $Matches[1].Trim('"').Trim("'") }
-          
-          if (-not $codeParam) {
-              Write-Error "Failed to parse token details from the input string."
-              exit 1
-          }
-          
-          # Format clean argument strings to invoke registration natively
-          $arguments = @(
-              "--code=`"$codeParam`"",
-              "--redirect-url=`"$redirectParam`"",
-              "--name=`"$env:COMPUTERNAME`"",
-              "--pin=`"$pin`""
-          )
-          
-          Write-Host "Sending native registration handshake signal to Google account..."
-          $process = Start-Process -FilePath $exePath -ArgumentList $arguments -NoNewWindow -PassThru -Wait
-          Write-Host "Registration engine closed with exit status: $($process.ExitCode)"
 
       - name: Maintain Connection Loop
         shell: powershell
@@ -94,6 +123,6 @@ jobs:
           Write-Host "==================================================`n"
           
           while ($true) {
-              Write-Host "[$(Get-Date)] Runner Active - Monitoring incoming web dashboard traffic..."
+              Write-Host "[$(Get-Date)] Session Active - Protected by Failover Engine"
               Start-Sleep -Seconds 300
           }
