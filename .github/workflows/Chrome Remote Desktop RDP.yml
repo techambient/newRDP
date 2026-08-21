@@ -17,30 +17,28 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Download and Force Deploy Chrome Remote Desktop
+      - name: Administrative Extraction of Chrome Remote Desktop
         shell: powershell
         run: |
           $ProgressPreference = 'SilentlyContinue'
           
-          Write-Host "Downloading Google's secure installation package..."
+          Write-Host "Downloading Google's installation package..."
           $msiUrl = "https://google.com"
           $installerPath = "$env:TEMP\crd.msi"
           Invoke-WebRequest -Uri $msiUrl -OutFile $installerPath
           
-          Write-Host "Deploying installer inside an isolated system task session..."
-          # Running the MSI using a dedicated background argument script isolates the install thread
-          # This breaks any modal windows or update prompts that freeze headless machines
-          $scriptBlock = {
-              param($path)
-              Start-Process msiexec.exe -ArgumentList "/i", "`"$path`"", "/qn", "/norestart", "ALLUSERS=1" -Wait
-          }
+          Write-Host "Performing administrative file extraction..."
+          $extractDir = "C:\CRD_Target"
           
-          $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $installerPath
-          Write-Host "Waiting 30 seconds for background execution to commit changes..."
-          $job | Wait-Job -Timeout 30 | Receive-Job
+          # /a creates an administrative installation option, dumping the files cleanly without service lockups
+          Start-Process msiexec.exe -ArgumentList "/a", "`"$installerPath`"", "/qn", "TARGETDIR=`"$extractDir`"" -Wait
           
-          # Clean up download residue
           if (Test-Path $installerPath) { Remove-Item $installerPath -Force }
+          
+          Write-Host "Verifying extraction folder structure..."
+          if (Test-Path $extractDir) {
+              Get-ChildItem -Path $extractDir -Recurse -Filter "remoting_start_host.exe" -ErrorAction SilentlyContinue | Select-Object FullName
+          }
 
       - name: Configure and Start CRD Session
         shell: powershell
@@ -51,11 +49,11 @@ jobs:
           
           $pin = "${{ github.event.inputs.pin_code }}"
           
-          # Scan common installation folder configurations dynamically
+          # Scan our manual extraction target folder instead of default system folders
           $searchPaths = @(
-              "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe",
-              "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe",
-              "C:\Program Files\Google\Chrome Remote Desktop\*\remoting_start_host.exe"
+              "C:\CRD_Target\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe",
+              "C:\CRD_Target\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe",
+              "C:\CRD_Target\*\remoting_start_host.exe"
           )
           
           $exePath = $null
@@ -65,14 +63,14 @@ jobs:
           }
           
           if (-not $exePath) {
-              Write-Error "CRD executable could not be mapped. Let's force an directory scan to triage..."
-              Get-ChildItem -Path "C:\Program Files" -Recurse -Filter "*remoting*" -ErrorAction SilentlyContinue | Select-Object FullName
+              Write-Error "CRD executable could not be mapped within extracted directories. Let's trace folder content:"
+              Get-ChildItem -Path "C:\CRD_Target" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
               exit 1
           }
           
           Write-Host "Target engine isolated at: $exePath"
           
-          # Parse parameter arrays safely from your string input parameters
+          # Safely isolate the auth code token parameter from your raw dashboard command string
           $codeParam = ""
           $redirectParam = "https://remotedesktop.google.com/_/oauthredirect"
           
@@ -80,7 +78,7 @@ jobs:
           elseif ($rawInput -match '--code=([^ ]+)') { $codeParam = $Matches[1].Trim('"') }
           
           if (-not $codeParam) {
-              Write-Error "Failed to isolate valid token values from input. Please check configuration command layout."
+              Write-Error "Failed to parse authorization code token from your input text! Check layout string context."
               exit 1
           }
           
@@ -91,7 +89,7 @@ jobs:
               "--pin=`"$pin`""
           )
           
-          Write-Host "Registering machine instance with Google..."
+          Write-Host "Registering machine instance with Google infrastructure..."
           $process = Start-Process -FilePath $exePath -ArgumentList $arguments -NoNewWindow -PassThru -Wait
           
           if ($process.ExitCode -ne 0) {
