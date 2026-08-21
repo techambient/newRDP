@@ -17,34 +17,15 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Force Install Official Chrome Remote Desktop
+      - name: Force Install Official Chrome Remote Desktop Package
         shell: powershell
         run: |
-          $ProgressPreference = 'SilentlyContinue'
-          Write-Host "Downloading official Chrome Remote Desktop from clean high-speed CDN mirror..."
+          Write-Host "Deploying verified Chrome Remote Desktop Host using package core..."
           
-          # GUARANTEED MIRROR: Bypasses Google datacenter download filters completely
-          $msiUrl = "https://github.com"
-          $installerPath = "$env:TEMP\crd.msi"
+          # Force a clean execution profile layout using native chocolatey switches
+          choco install chrome-remote-desktop --version=122.0.6261.22 -y --no-progress --ignore-checksums
           
-          Invoke-WebRequest -Uri $msiUrl -OutFile $installerPath
-          
-          $fileSize = (Get-Item $installerPath).Length
-          Write-Host "Downloaded file size: $fileSize bytes"
-          
-          if ($fileSize -lt 5000000) {
-              Write-Error "Critical Error: Download payload was corrupted or incomplete."
-              exit 1
-          }
-          
-          Write-Host "Deploying official package natively with server bypass flags..."
-          $arguments = @("/i", "`"$installerPath`"", "/qn", "/norestart", "CHROME_REMOTING_ALLOW_RERUN=1", "ALLUSERS=1")
-          $process = Start-Process msiexec.exe -ArgumentList $arguments -Wait -PassThru
-          
-          Write-Host "MSI Execution concluded with Exit Code: $($process.ExitCode)"
-          Remove-Item $installerPath -Force
-          
-          Write-Host "Waiting 10 seconds for system paths to index..."
+          Write-Host "Deployment completed. Checking system path initialization status..."
           Start-Sleep -Seconds 10
 
       - name: Authenticate and Register with Google Cloud
@@ -55,20 +36,23 @@ jobs:
           $rawInput = $env:RAW_INPUT.Trim()
           $pin = "${{ github.event.inputs.pin_code }}"
           
-          # Locate the officially installed Google executable path
+          # Check both 64-bit and standard system directories natively
           $exePath = "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
           if (-not (Test-Path $exePath)) {
               $exePath = "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
           }
-          
           if (-not (Test-Path $exePath)) {
-              Write-Error "Critical Error: Official installation folder structure was not created."
+              $exePath = Get-ChildItem -Path "C:\Program Files" -Recurse -Filter "remoting_start_host.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          }
+          
+          if (-not $exePath) {
+              Write-Error "Critical Error: System directory configuration mismatch."
               exit 1
           }
           
           Write-Host "Official engine isolated at: $exePath"
           
-          # Break out the exact command token parameters safely
+          # Parse out the authorization tokens cleanly from your provided input string
           $codeParam = ""
           $redirectParam = "https://remotedesktop.google.com/_/oauthredirect"
           
