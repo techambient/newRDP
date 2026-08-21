@@ -30,30 +30,55 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           
           Remove-Item $installerPath -Force
-          Write-Host "Installation finalized."
+          Write-Host "Installation completed. Waiting 10 seconds for service paths to initialize..."
+          Start-Sleep -Seconds 10
 
       - name: Configure and Start CRD Session
         shell: powershell
         run: |
-          # Use a Here-String block to safely swallow the command line text without quote parsing conflicts
-          $authCmd = @'
+          # Safely swallow raw input string
+          $rawInput = @'
           ${{ github.event.inputs.auth_code }}
           '@.Trim()
           
           $pin = "${{ github.event.inputs.pin_code }}"
           
-          # Strip accidental outer quotes if they exist
-          if ($authCmd.StartsWith('"') -and $authCmd.EndsWith('"')) {
-              $authCmd = $authCmd.Substring(1, $authCmd.Length - 2)
+          # Use the absolute environment path target to find the executable reliably
+          $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+          $exePath = Join-Path $programFilesX86 "Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          
+          if (-not (Test-Path $exePath)) {
+              Write-Error "CRD executable could not be found at: $exePath"
+              exit 1
           }
           
-          # Append the PIN argument
-          $finalCmd = $authCmd + " --pin=" + $pin
+          # Extract out Google's token arguments from your input command safely
+          $codeParam = ""
+          $redirectParam = ""
           
-          Write-Host "Registering runner machine with Google's headless service..."
+          if ($rawInput -match '--code="([^"]+)"') { $codeParam = $matches[1] }
+          if ($rawInput -match '--redirect-url="([^"]+)"') { $redirectParam = $matches[1] }
           
-          # Force execution cleanly through CMD context
-          cmd.exe /c $finalCmd
+          if (-not $codeParam) {
+              Write-Error "Failed to parse authorization code token from your input text!"
+              exit 1
+          }
+          
+          # Build a perfectly formatted native execution command string
+          $arguments = @(
+              "--code=`"$codeParam`"",
+              "--redirect-url=`"$redirectParam`"",
+              "--name=`"$env:COMPUTERNAME`"",
+              "--pin=`"$pin`""
+          )
+          
+          Write-Host "Registering runner machine with Google using explicit parameters..."
+          $process = Start-Process -FilePath $exePath -ArgumentList $arguments -NoNewWindow -PassThru -Wait
+          
+          if ($process.ExitCode -ne 0) {
+              Write-Error "Host registration failed with exit code $($process.ExitCode)"
+              exit 1
+          }
 
       - name: Maintain Connection Loop
         shell: powershell
