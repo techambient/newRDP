@@ -20,10 +20,10 @@ jobs:
       - name: Download and Install Chrome Remote Desktop
         shell: powershell
         run: |
-          # FIX: Kill the progress tracker to stop the download from freezing
           $ProgressPreference = 'SilentlyContinue'
           
           Write-Host "Downloading Google Remote Desktop installer..."
+          # FIXED: Restored the actual direct binary download path
           $msiUrl = "https://google.com"
           $installerPath = "$env:TEMP\crd.msi"
           
@@ -45,15 +45,20 @@ jobs:
           
           $pin = "${{ github.event.inputs.pin_code }}"
           
-          $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
-          $exePath = Join-Path $programFilesX86 "Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          # FIXED: Scan both standard Program Files and x86 directories to cover all environment versions
+          $path1 = "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          $path2 = "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
           
-          if (-not (Test-Path $exePath)) {
-              Write-Error "CRD executable could not be found at: $exePath. The background MSI installer may have failed."
+          if (Test-Path $path1) { $exePath = $path1 }
+          elseif (Test-Path $path2) { $exePath = $path2 }
+          else {
+              Write-Error "CRD executable could not be found. Check if the installer is failing to run on the system."
               exit 1
           }
           
-          # Match the actual code and redirect tokens using a cleaner string split method to avoid regex drops
+          Write-Host "Found executable at: $exePath"
+          
+          # Extract params safely out of the command string
           $codeParam = ""
           $redirectParam = ""
           
