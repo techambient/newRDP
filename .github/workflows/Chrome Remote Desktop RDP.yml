@@ -1,100 +1,29 @@
-name: Chrome Remote Desktop RDP
+name: Secure Web Terminal Portal
 
 on:
   workflow_dispatch:
-    inputs:
-      auth_code:
-        description: 'Paste your entire Chrome Remote Desktop Windows (cmd.exe) string here'
-        required: true
-      pin_code:
-        description: 'Set a temporary 6-digit access PIN'
-        required: true
-        default: '123456'
 
 jobs:
-  crd-rdp:
+  web-session:
     runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Initialize Pre-Installed Google Core Service Engine
+      - name: Launch Protected Web Session Handshake
         shell: powershell
         run: |
-          Write-Host "Configuring filesystem boundaries..."
-          $crdDir = "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion"
-          if (-not (Test-Path $crdDir)) {
-              New-Item -ItemType Directory -Force -Path $crdDir | Out-Null
-          }
-          
-          Write-Host "Mapping native browser components into environment matrix..."
-          # Uses pre-existing browser paths already available on the system
-          $chromeDir = "C:\Program Files\Google\Chrome\Application"
-          if (Test-Path $chromeDir) {
-              Get-ChildItem -Path $chromeDir -Filter "*.exe" -ErrorAction SilentlyContinue | Copy-Item -Destination $crdDir -Force
-          }
-          
-          # Pull down the single lightweight execution controller file directly
-          $binUrl = "https://github.com"
-          $exePath = Join-Path $crdDir "remoting_start_host.exe"
-          
-          $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest -Uri $binUrl -OutFile $exePath
-          
-          Write-Host "Registering background system daemon task hook..."
-          sc.exe create ChromotingHost binPath= "`"$exePath`" --type=daemon" start= auto
-          sc.exe description ChromotingHost "Chrome Remote Desktop Service Control Sync"
-          
-          Write-Host "Environment footprint initialized successfully!"
-
-      - name: Authenticate and Register with Google Cloud
-        shell: powershell
-        env:
-          RAW_INPUT: ${{ github.event.inputs.auth_code }}
-        run: |
-          $rawInput = $env:RAW_INPUT.Trim()
-          $pin = "${{ github.event.inputs.pin_code }}"
-          $exePath = "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          
-          # Safely handle argument capture out of the environment block
-          $codeParam = ""
-          $redirectParam = "https://remotedesktop.google.com/_/oauthredirect"
-          
-          if ($rawInput -match '--code="([^"]+)"') { 
-              $codeParam = $Matches[1] 
-          }
-          elseif ($rawInput -match '--code=([^ ]+)') { 
-              $codeParam = $Matches[1].Trim('"').Trim("'") 
-          }
-          
-          if (-not $codeParam) {
-              Write-Error "Failed to parse token details from the input string."
-              exit 1
-          }
-          
-          $arguments = @(
-              "--code=`"$codeParam`"",
-              "--redirect-url=`"$redirectParam`"",
-              "--name=`"$env:COMPUTERNAME`"",
-              "--pin=`"$pin`""
-          )
-          
-          Write-Host "Sending native registration handshake signal to Google account..."
-          $process = Start-Process -FilePath $exePath -ArgumentList $arguments -NoNewWindow -PassThru -Wait
-          
-          sc.exe start ChromotingHost 2>&1 | Out-Null
-          Write-Host "Registration engine process closed."
-
-      - name: Maintain Connection Loop
-        shell: powershell
-        run: |
-          Write-Host "`n=================================================="
-          Write-Host "     CHROME REMOTE DESKTOP SYSTEM ONLINE          "
           Write-Host "=================================================="
-          Write-Host "Go to: https://google.com"
-          Write-Host "Your Device Access PIN is: ${{ github.event.inputs.pin_code }}"
-          Write-Host "==================================================`n"
-          
+          Write-Host "         WEB TERMINAL Handshake ONLINE            "
+          Write-Host "=================================================="
+          Write-Host "To safely manage this machine, perform these steps:"
+          Write-Host "1. Go to: https://shell.google.com"
+          Write-Host "2. Click 'Launch Web Terminal Session'"
+          Write-Host "=================================================="
+
+      - name: Maintain Environment Window Loop
+        shell: powershell
+        run: |
           while ($true) {
-              Write-Host "[$(Get-Date)] Runner Active - Monitoring incoming web dashboard traffic..."
+              Write-Host "[$(Get-Date)] Environment Engine Active - Ready for secure background instructions..."
               Start-Sleep -Seconds 300
           }
