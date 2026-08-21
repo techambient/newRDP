@@ -17,23 +17,14 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Download and Install Chrome Remote Desktop
+      - name: Install Chrome Remote Desktop via Chocolatey
         shell: powershell
         run: |
-          $ProgressPreference = 'SilentlyContinue'
+          Write-Host "Deploying Chrome Remote Desktop Host using Chocolatey..."
+          # choco handles headless automation, privilege allocation, and dependencies cleanly
+          choco install chrome-remote-desktop -y --no-progress
           
-          Write-Host "Downloading Google Remote Desktop installer..."
-          # FIXED: Restored the actual direct binary download path
-          $msiUrl = "https://google.com"
-          $installerPath = "$env:TEMP\crd.msi"
-          
-          Invoke-WebRequest -Uri $msiUrl -OutFile $installerPath
-          
-          Write-Host "Installing MSI silently..."
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/qn", "/norestart" -Wait
-          
-          Remove-Item $installerPath -Force
-          Write-Host "Installation execution completed. Waiting 15 seconds for file registration..."
+          Write-Host "Deployment completed. Pausing 15 seconds to ensure host services stabilize..."
           Start-Sleep -Seconds 15
 
       - name: Configure and Start CRD Session
@@ -45,28 +36,39 @@ jobs:
           
           $pin = "${{ github.event.inputs.pin_code }}"
           
-          # FIXED: Scan both standard Program Files and x86 directories to cover all environment versions
-          $path1 = "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          $path2 = "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          # Dynamically trace the location of the installed executable target
+          $searchPaths = @(
+              "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe",
+              "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe",
+              "C:\Program Files\Google\Chrome Remote Desktop\*\remoting_start_host.exe",
+              "C:\Program Files (x86)\Google\Chrome Remote Desktop\*\remoting_start_host.exe"
+          )
           
-          if (Test-Path $path1) { $exePath = $path1 }
-          elseif (Test-Path $path2) { $exePath = $path2 }
-          else {
-              Write-Error "CRD executable could not be found. Check if the installer is failing to run on the system."
+          $exePath = $null
+          foreach ($path in $searchPaths) {
+              $resolved = Resolve-Path $path -ErrorAction SilentlyContinue
+              if ($resolved) {
+                  $exePath = $resolved.Path
+                  break
+              }
+          }
+          
+          if (-not $exePath) {
+              Write-Error "CRD executable could not be located in standard file system paths!"
               exit 1
           }
           
-          Write-Host "Found executable at: $exePath"
+          Write-Host "Target located at: $exePath"
           
-          # Extract params safely out of the command string
+          # Isolate parameters cleanly from your command input line string
           $codeParam = ""
-          $redirectParam = ""
+          $redirectParam = "https://google.com"
           
           if ($rawInput -match '--code="([^"]+)"') { $codeParam = $Matches[1] }
-          if ($rawInput -match '--redirect-url="([^"]+)"') { $redirectParam = $Matches[1] }
+          elseif ($rawInput -match '--code=([^ ]+)') { $codeParam = $Matches[1].Trim('"') }
           
           if (-not $codeParam) {
-              Write-Error "Failed to parse authorization code token from your input text!"
+              Write-Error "Failed to isolate valid authorization token values from your input text block."
               exit 1
           }
           
@@ -77,11 +79,11 @@ jobs:
               "--pin=`"$pin`""
           )
           
-          Write-Host "Registering runner machine with Google using explicit parameters..."
+          Write-Host "Registering machine profile with Google services..."
           $process = Start-Process -FilePath $exePath -ArgumentList $arguments -NoNewWindow -PassThru -Wait
           
           if ($process.ExitCode -ne 0) {
-              Write-Error "Host registration failed with exit code $($process.ExitCode)"
+              Write-Error "Google service host registration dropped out with error code: $($process.ExitCode)"
               exit 1
           }
 
@@ -91,7 +93,7 @@ jobs:
           Write-Host "`n=================================================="
           Write-Host "     CHROME REMOTE DESKTOP SYSTEM ONLINE          "
           Write-Host "=================================================="
-          Write-Host "Go to: https://google.com"
+          Write-Host "Go to: https://remotedesktop.google.com/access"
           Write-Host "Your Device Access PIN is: ${{ github.event.inputs.pin_code }}"
           Write-Host "==================================================`n"
           
