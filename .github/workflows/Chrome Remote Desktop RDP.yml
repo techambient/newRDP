@@ -35,19 +35,24 @@ jobs:
       - name: Configure and Start CRD Session
         shell: powershell
         run: |
-          # Fetch the raw inputs
-          $authCmd = "${{ github.event.inputs.auth_code }}"
+          # Use a Here-String block to safely swallow the command line text without quote parsing conflicts
+          $authCmd = @'
+          ${{ github.event.inputs.auth_code }}
+          '@.Trim()
+          
           $pin = "${{ github.event.inputs.pin_code }}"
           
-          # Clean up any accidental outer single or double quotes the user might have included
-          $authCmd = $authCmd.Trim("'").Trim('"')
+          # Strip accidental outer quotes if they exist
+          if ($authCmd.StartsWith('"') -and $authCmd.EndsWith('"')) {
+              $authCmd = $authCmd.Substring(1, $authCmd.Length - 2)
+          }
           
-          # Append the critical host PIN parameter directly to the instruction string
+          # Append the PIN argument
           $finalCmd = $authCmd + " --pin=" + $pin
           
           Write-Host "Registering runner machine with Google's headless service..."
           
-          # Force execution through traditional CMD context to prevent PowerShell variable translation errors
+          # Force execution cleanly through CMD context
           cmd.exe /c $finalCmd
 
       - name: Maintain Connection Loop
@@ -60,7 +65,6 @@ jobs:
           Write-Host "Your Device Access PIN is: ${{ github.event.inputs.pin_code }}"
           Write-Host "==================================================`n"
           
-          # Keep runner alive securely
           while ($true) {
               Write-Host "[$(Get-Date)] Session Alive - Ready for connections via Google Web Dashboard"
               Start-Sleep -Seconds 300
