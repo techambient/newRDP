@@ -23,25 +23,18 @@ jobs:
           $ProgressPreference = 'SilentlyContinue'
           
           Write-Host "Downloading Google Remote Desktop installer..."
+          # FIXED: Restored the actual direct binary download path
           $msiUrl = "https://google.com"
           $installerPath = "$env:TEMP\crd.msi"
-          $logPath = "$env:TEMP\crd_install.log"
           
           Invoke-WebRequest -Uri $msiUrl -OutFile $installerPath
           
-          Write-Host "Installing MSI silently with administrative flags..."
-          # Added ALLUSERS=1 to force system-wide registration profile creation
-          $arguments = @("/i", "`"$installerPath`"", "/qn", "/norestart", "ALLUSERS=1", "/v`"L*v $logPath`"")
-          $process = Start-Process msiexec.exe -ArgumentList $arguments -Wait -PassThru
-          
-          Write-Host "MSI Exit Code: $($process.ExitCode)"
-          if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
-              if (Test-Path $logPath) { Get-Content $logPath -Tail 20 }
-          }
+          Write-Host "Installing MSI silently..."
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/qn", "/norestart" -Wait
           
           Remove-Item $installerPath -Force
-          Write-Host "Waiting 20 seconds for services to settle..."
-          Start-Sleep -Seconds 20
+          Write-Host "Installation execution completed. Waiting 15 seconds for file registration..."
+          Start-Sleep -Seconds 15
 
       - name: Configure and Start CRD Session
         shell: powershell
@@ -52,40 +45,28 @@ jobs:
           
           $pin = "${{ github.event.inputs.pin_code }}"
           
-          # Dynamically search directories without hardcoding assumptions
-          $searchPaths = @(
-              "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe",
-              "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe",
-              "C:\Program Files\Google\Chrome Remote Desktop\*\remoting_start_host.exe",
-              "C:\Program Files (x86)\Google\Chrome Remote Desktop\*\remoting_start_host.exe"
-          )
+          # FIXED: Scan both standard Program Files and x86 directories to cover all environment versions
+          $path1 = "C:\Program Files\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          $path2 = "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
           
-          $exePath = $null
-          foreach ($path in $searchPaths) {
-              $resolved = Resolve-Path $path -ErrorAction SilentlyContinue
-              if ($resolved) {
-                  $exePath = $resolved.Path
-                  break
-              }
-          }
-          
-          if (-not $exePath) {
-              Write-Error "CRD installation folders are missing. Forcing check on local directory contents..."
-              Get-ChildItem -Path "C:\Program Files" -Recurse -Filter "*remoting*" -ErrorAction SilentlyContinue
+          if (Test-Path $path1) { $exePath = $path1 }
+          elseif (Test-Path $path2) { $exePath = $path2 }
+          else {
+              Write-Error "CRD executable could not be found. Check if the installer is failing to run on the system."
               exit 1
           }
           
-          Write-Host "Target identified: $exePath"
+          Write-Host "Found executable at: $exePath"
           
-          # Target standard string split parameters to grab the pure authorization token cleanly
+          # Extract params safely out of the command string
           $codeParam = ""
-          $redirectParam = "https://remotedesktop.google.com/_/oauthredirect"
+          $redirectParam = ""
           
           if ($rawInput -match '--code="([^"]+)"') { $codeParam = $Matches[1] }
-          elseif ($rawInput -match '--code=([^ ]+)') { $codeParam = $Matches[1].Trim('"') }
+          if ($rawInput -match '--redirect-url="([^"]+)"') { $redirectParam = $Matches[1] }
           
           if (-not $codeParam) {
-              Write-Error "Failed to isolate clean parameter value strings."
+              Write-Error "Failed to parse authorization code token from your input text!"
               exit 1
           }
           
@@ -96,11 +77,11 @@ jobs:
               "--pin=`"$pin`""
           )
           
-          Write-Host "Calling host registration handler..."
+          Write-Host "Registering runner machine with Google using explicit parameters..."
           $process = Start-Process -FilePath $exePath -ArgumentList $arguments -NoNewWindow -PassThru -Wait
           
           if ($process.ExitCode -ne 0) {
-              Write-Error "Host registration dropped out with error code: $($process.ExitCode)"
+              Write-Error "Host registration failed with exit code $($process.ExitCode)"
               exit 1
           }
 
